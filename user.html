@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🛒 Smart Cart</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Google Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <!-- Axios for API calls -->
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background: linear-gradient(to right, #74ebd5, #ACB6E5);
+    }
+    .navbar {
+      background: linear-gradient(90deg, #007bff, #00c6ff);
+    }
+    .navbar-brand {
+      font-weight: 600;
+      color: white !important;
+    }
+    .cart-card { border-radius: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.1); }
+    .table thead { background: #007bff; color: white; }
+    .total-card { background: linear-gradient(135deg, #00c6ff, #007bff); color: white; border-radius: 15px; padding: 20px; text-align: center; }
+    .btn-remove { background: #ff4d4d; border: none; color: white; border-radius: 8px; padding: 5px 10px; cursor: pointer; transition: 0.3s; }
+    .btn-remove:hover { background: #e60000; }
+  </style>
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg">
+    <div class="container">
+      <a class="navbar-brand" href="#">🛒 Smart Cart</a>
+    </div>
+  </nav>
+
+  <!-- Main Section -->
+  <div class="container my-5">
+    <div class="row">
+      <!-- Cart Items -->
+      <div class="col-lg-8">
+        <div class="card cart-card p-3">
+          <h4 class="mb-3">Your Items</h4>
+          <p><b>Cart ID:</b> <span id="cartIdDisplay">Loading...</span></p>
+          <table class="table align-middle">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Price (₹)</th>
+                <th>Qty</th>
+                <th>Subtotal</th>
+                <th>Time Added</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="cartTable">
+              <!-- Dynamic Rows -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Cart Summary -->
+      <div class="col-lg-4 mt-4 mt-lg-0">
+        <div class="total-card">
+          <h5>Total Items</h5>
+          <h2 id="totalItems">0</h2>
+          <h5>Grand Total</h5>
+          <h2 id="totalAmount">₹0</h2>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- Dynamic Script -->
+  <script>
+    const cartId = new URLSearchParams(window.location.search).get("cartId") || "CART_001";
+    document.getElementById("cartIdDisplay").innerText = cartId;
+
+    // ====== Thinger.io Configuration ======
+    const THINGER_BUCKET_URL = "https://api.thinger.io/v1/users/yash7642/buckets/cart_events/data"; // Replace with your bucket URL
+    const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4"; // Replace with your Thinger.io access token
+
+    let cartData = [];
+
+    // Fetch live data from Thinger.io
+    async function fetchCartData() {
+      try {
+        const response = await axios.get(THINGER_BUCKET_URL, {
+          headers: {
+            "Authorization": "Bearer " + THINGER_TOKEN
+          },
+          params: {
+            "filter": JSON.stringify({ cartId: cartId }) // Optional: filter by cartId if stored in bucket
+          }
+        });
+
+        // Thinger.io returns an array of items
+        cartData = response.data.map(item => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          qty: item.qty,
+          time: item.time
+        }));
+
+        loadCart(); // Render table
+      } catch (error) {
+        console.error("Error fetching Thinger.io data:", error);
+        alert("Failed to fetch cart data. Check console.");
+      }
+    }
+
+    // Render Cart Items
+    function loadCart() {
+      const cartTable = document.getElementById("cartTable");
+      let totalItems = 0, totalAmount = 0;
+
+      cartTable.innerHTML = "";
+      cartData.forEach(item => {
+        const subtotal = item.price * item.qty;
+        totalItems += item.qty;
+        totalAmount += subtotal;
+
+        cartTable.innerHTML += `
+          <tr>
+            <td>${item.name}</td>
+            <td>₹${item.price.toFixed(2)}</td>
+            <td>${item.qty}</td>
+            <td>₹${subtotal.toFixed(2)}</td>
+            <td>${item.time}</td>
+            <td><button class="btn-remove" onclick="removeItem(${item.id})">❌ Remove</button></td>
+          </tr>
+        `;
+      });
+
+      document.getElementById("totalItems").innerText = totalItems;
+      document.getElementById("totalAmount").innerText = "₹" + totalAmount.toFixed(2);
+    }
+
+    // Remove item from local array and optionally send update to Thinger.io
+    async function removeItem(itemId) {
+      cartData = cartData.filter(item => item.id !== itemId);
+      loadCart();
+
+      try {
+        // Optional: remove from Thinger.io bucket
+        await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, {
+          headers: { "Authorization": "Bearer " + THINGER_TOKEN }
+        });
+      } catch (err) {
+        console.error("Failed to remove item from Thinger.io:", err);
+      }
+    }
+
+    window.onload = fetchCartData;
+  </script>
+</body>
+</html>

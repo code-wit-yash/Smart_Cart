@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🛒 Smart Cart - Admin Panel</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Google Font -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <!-- Axios -->
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <style>
+    body { font-family: 'Poppins', sans-serif; background: #f0f2f5; }
+    .navbar { background: linear-gradient(90deg, #007bff, #00c6ff); }
+    .navbar-brand { color: white !important; font-weight: 600; }
+    .accordion-button:not(.collapsed) { background-color: #007bff; color: white; }
+    .btn-remove, .btn-checkout { border-radius: 8px; color: white; border: none; padding: 5px 10px; cursor: pointer; transition: 0.3s; }
+    .btn-remove { background: #ff4d4d; }
+    .btn-remove:hover { background: #e60000; }
+    .btn-checkout { background: #28a745; }
+    .btn-checkout:hover { background: #1e7e34; }
+    .alerts { color: red; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg">
+    <div class="container">
+      <a class="navbar-brand" href="#">🛒 Smart Cart - Admin</a>
+    </div>
+  </nav>
+
+  <div class="container my-5">
+    <h3 class="mb-4">All Carts</h3>
+    <div class="accordion" id="cartsAccordion">
+      <!-- Dynamic cart rows will appear here -->
+    </div>
+  </div>
+
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    // ====== Thinger.io Configuration ======
+    const THINGER_BUCKET_URL = "https://api.thinger.io/v1/users/yash7642/buckets/cart_events/data"; // Replace
+    const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4"; // Replace
+
+    let allCartData = [];
+
+    async function fetchAllCarts() {
+      try {
+        const res = await axios.get(THINGER_BUCKET_URL, {
+          headers: { "Authorization": "Bearer " + THINGER_TOKEN }
+        });
+        allCartData = res.data;
+        renderCarts();
+      } catch (err) {
+        console.error("Error fetching Thinger.io data:", err);
+        alert("Failed to fetch cart data. Check console.");
+      }
+    }
+
+    function renderCarts() {
+      const accordion = document.getElementById("cartsAccordion");
+      accordion.innerHTML = "";
+
+      // Group items by cartId
+      const carts = {};
+      allCartData.forEach(item => {
+        if (!carts[item.cartId]) carts[item.cartId] = [];
+        carts[item.cartId].push(item);
+      });
+
+      Object.keys(carts).forEach((cartId, idx) => {
+        const items = carts[cartId];
+        const totalAmount = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+        const totalItems = items.reduce((sum, i) => sum + i.qty, 0);
+
+        // Alert if any item is unscanned
+        const unscanned = items.some(i => i.scanned === false);
+        const alertMsg = unscanned ? "❗ Unscanned Item" : "";
+
+        const cardHTML = `
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="heading${idx}">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${idx}" aria-expanded="false" aria-controls="collapse${idx}">
+                Cart ID: ${cartId} | Total: ₹${totalAmount.toFixed(2)} | Alerts: <span class="alerts">${alertMsg}</span>
+              </button>
+            </h2>
+            <div id="collapse${idx}" class="accordion-collapse collapse" aria-labelledby="heading${idx}" data-bs-parent="#cartsAccordion">
+              <div class="accordion-body">
+                <table class="table align-middle">
+                  <thead>
+                    <tr>
+                      <th>Item Name</th>
+                      <th>Price (₹)</th>
+                      <th>Qty</th>
+                      <th>Total</th>
+                      <th>Time</th>
+                      <th>Scanned</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${items.map(item => `
+                      <tr>
+                        <td>${item.name}</td>
+                        <td>₹${item.price.toFixed(2)}</td>
+                        <td>${item.qty}</td>
+                        <td>₹${(item.price * item.qty).toFixed(2)}</td>
+                        <td>${item.time}</td>
+                        <td>${item.scanned ? "✅" : "❌"}</td>
+                        <td><button class="btn-remove" onclick="removeItem(${item.id})">❌ Remove</button></td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+                <button class="btn btn-checkout" onclick="checkoutCart('${cartId}')">✅ Checkout Cart</button>
+              </div>
+            </div>
+          </div>
+        `;
+        accordion.innerHTML += cardHTML;
+      });
+    }
+
+    async function removeItem(itemId) {
+      try {
+        await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, {
+          headers: { "Authorization": "Bearer " + THINGER_TOKEN }
+        });
+        allCartData = allCartData.filter(i => i.id !== itemId);
+        renderCarts();
+      } catch (err) {
+        console.error("Failed to remove item:", err);
+      }
+    }
+
+    // Checkout cart → clears all items for a cartId
+    async function checkoutCart(cartId) {
+      const itemsToRemove = allCartData.filter(i => i.cartId === cartId);
+      try {
+        for (const item of itemsToRemove) {
+          await axios.delete(`${THINGER_BUCKET_URL}/${item.id}`, {
+            headers: { "Authorization": "Bearer " + THINGER_TOKEN }
+          });
+        }
+        allCartData = allCartData.filter(i => i.cartId !== cartId);
+        renderCarts();
+        alert(`Cart ${cartId} has been checked out and cleared!`);
+      } catch (err) {
+        console.error("Checkout failed:", err);
+        alert("Checkout failed. Check console.");
+      }
+    }
+
+    window.onload = fetchAllCarts;
+  </script>
+</body>
+</html>
