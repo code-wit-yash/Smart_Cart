@@ -63,7 +63,8 @@
     const cartId = new URLSearchParams(window.location.search).get("cartId") || "CART_001";
     document.getElementById("cartIdDisplay").innerText = cartId;
 
-    const THINGER_BUCKET_URL = "https://api.thinger.io/v1/users/yash7642/buckets/cart_events/data";
+    const THINGER_BUCKET_URL = "https://api.thinger.io/v2/users/yash7642/buckets/cart_events/data";  
+        
     const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4"; // Replace
 
     let cartData = [];
@@ -147,3 +148,4 @@
   </script>
 </body>
 </html>
+
