@@ -36,9 +36,10 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     const THINGER_BUCKET_URL = "https://api.thinger.io/v2/users/yash7642/buckets/cart_events/data";
-    const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4"; // Replace
+    const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4";
 
-    let allCartData = [];
+    let allCartData = {};
+    let openCartId = null;
 
     async function fetchAllCarts() {
       try {
@@ -53,10 +54,8 @@
         rawData.forEach(item => {
           const cartId = item.cartId;
           const name = item.item;
-          const key = cartId + "_" + name;
 
           if (!carts[cartId]) carts[cartId] = {};
-
           if (carts[cartId][name]) {
             carts[cartId][name].qty += 1;
           } else {
@@ -71,8 +70,12 @@
           }
         });
 
-        allCartData = carts;
-        renderCarts();
+        // Check if data has changed to avoid unnecessary rerender
+        if (JSON.stringify(carts) !== JSON.stringify(allCartData)) {
+          allCartData = carts;
+          renderCarts();
+        }
+
       } catch (err) {
         console.error("Error fetching Thinger.io data:", err);
       }
@@ -85,21 +88,24 @@
       Object.keys(allCartData).forEach((cartId, idx) => {
         const itemsObj = allCartData[cartId];
         const items = Object.values(itemsObj);
-
         const totalAmount = items.reduce((sum, i) => sum + i.price * i.qty, 0);
-        const totalItems = items.reduce((sum, i) => sum + i.qty, 0);
 
         const unscanned = items.some(i => !i.scanned);
         const alertMsg = unscanned ? "❗ Unscanned Item" : "";
 
+        const collapseClass = (cartId === openCartId) ? "accordion-collapse collapse show" : "accordion-collapse collapse";
+        const buttonClass = (cartId === openCartId) ? "accordion-button" : "accordion-button collapsed";
+        const ariaExpanded = (cartId === openCartId) ? "true" : "false";
+
         const cardHTML = `
           <div class="accordion-item">
             <h2 class="accordion-header" id="heading${idx}">
-              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${idx}" aria-expanded="false" aria-controls="collapse${idx}">
+              <button class="${buttonClass}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${idx}" 
+                      aria-expanded="${ariaExpanded}" aria-controls="collapse${idx}" onclick="openCartId='${cartId}'">
                 Cart ID: ${cartId} | Total: ₹${totalAmount.toFixed(2)} | Alerts: <span class="alerts">${alertMsg}</span>
               </button>
             </h2>
-            <div id="collapse${idx}" class="accordion-collapse collapse" aria-labelledby="heading${idx}" data-bs-parent="#cartsAccordion">
+            <div id="collapse${idx}" class="${collapseClass}" aria-labelledby="heading${idx}" data-bs-parent="#cartsAccordion">
               <div class="accordion-body">
                 <table class="table align-middle">
                   <thead>
@@ -139,13 +145,14 @@
     async function removeItem(itemId, cartId, name) {
       try {
         await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, { headers: { "Authorization": "Bearer " + THINGER_TOKEN } });
-        // Update local data
         if (allCartData[cartId] && allCartData[cartId][name]) {
           allCartData[cartId][name].qty -= 1;
           if (allCartData[cartId][name].qty <= 0) delete allCartData[cartId][name];
         }
         renderCarts();
-      } catch (err) { console.error("Failed to remove item:", err); }
+      } catch (err) {
+        console.error("Failed to remove item:", err);
+      }
     }
 
     async function checkoutCart(cartId) {
@@ -164,10 +171,9 @@
       }
     }
 
-    // Fetch data every 2 seconds for real-time updates
-    setInterval(fetchAllCarts, 2000);
+    // Smooth real-time updates every 5 seconds
+    setInterval(fetchAllCarts, 5000);
     window.onload = fetchAllCarts;
   </script>
 </body>
 </html>
-
