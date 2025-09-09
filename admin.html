@@ -4,11 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>🛒 Smart Cart - Admin Panel</title>
-  <!-- Bootstrap CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <!-- Google Font -->
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
-  <!-- Axios -->
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
   <style>
     body { font-family: 'Poppins', sans-serif; background: #f0f2f5; }
@@ -25,7 +22,6 @@
 </head>
 <body>
 
-  <!-- Navbar -->
   <nav class="navbar navbar-expand-lg">
     <div class="container">
       <a class="navbar-brand" href="#">🛒 Smart Cart - Admin</a>
@@ -34,17 +30,12 @@
 
   <div class="container my-5">
     <h3 class="mb-4">All Carts</h3>
-    <div class="accordion" id="cartsAccordion">
-      <!-- Dynamic cart rows will appear here -->
-    </div>
+    <div class="accordion" id="cartsAccordion"></div>
   </div>
 
-  <!-- Bootstrap JS -->
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
   <script>
-    // ====== Thinger.io Configuration ======
-    const THINGER_BUCKET_URL = "https://api.thinger.io/v1/users/yash7642/buckets/cart_events/data"; // Replace
+    const THINGER_BUCKET_URL = "https://api.thinger.io/v1/users/yash7642/buckets/cart_events/data";
     const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4"; // Replace
 
     let allCartData = [];
@@ -54,11 +45,36 @@
         const res = await axios.get(THINGER_BUCKET_URL, {
           headers: { "Authorization": "Bearer " + THINGER_TOKEN }
         });
-        allCartData = res.data;
+
+        const rawData = res.data;
+
+        // Aggregate repeated items per cartId + name
+        const carts = {};
+        rawData.forEach(item => {
+          const cartId = item.cartId;
+          const name = item.item;
+          const key = cartId + "_" + name;
+
+          if (!carts[cartId]) carts[cartId] = {};
+
+          if (carts[cartId][name]) {
+            carts[cartId][name].qty += 1;
+          } else {
+            carts[cartId][name] = {
+              id: item.eventId,
+              name: name,
+              price: item.price,
+              qty: 1,
+              time: new Date(item.timestamp).toLocaleTimeString(),
+              scanned: item.action !== "UNKNOWN"
+            };
+          }
+        });
+
+        allCartData = carts;
         renderCarts();
       } catch (err) {
         console.error("Error fetching Thinger.io data:", err);
-        alert("Failed to fetch cart data. Check console.");
       }
     }
 
@@ -66,20 +82,14 @@
       const accordion = document.getElementById("cartsAccordion");
       accordion.innerHTML = "";
 
-      // Group items by cartId
-      const carts = {};
-      allCartData.forEach(item => {
-        if (!carts[item.cartId]) carts[item.cartId] = [];
-        carts[item.cartId].push(item);
-      });
+      Object.keys(allCartData).forEach((cartId, idx) => {
+        const itemsObj = allCartData[cartId];
+        const items = Object.values(itemsObj);
 
-      Object.keys(carts).forEach((cartId, idx) => {
-        const items = carts[cartId];
         const totalAmount = items.reduce((sum, i) => sum + i.price * i.qty, 0);
         const totalItems = items.reduce((sum, i) => sum + i.qty, 0);
 
-        // Alert if any item is unscanned
-        const unscanned = items.some(i => i.scanned === false);
+        const unscanned = items.some(i => !i.scanned);
         const alertMsg = unscanned ? "❗ Unscanned Item" : "";
 
         const cardHTML = `
@@ -112,7 +122,7 @@
                         <td>₹${(item.price * item.qty).toFixed(2)}</td>
                         <td>${item.time}</td>
                         <td>${item.scanned ? "✅" : "❌"}</td>
-                        <td><button class="btn-remove" onclick="removeItem(${item.id})">❌ Remove</button></td>
+                        <td><button class="btn-remove" onclick="removeItem('${item.id}', '${cartId}', '${item.name}')">❌ Remove</button></td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -126,36 +136,36 @@
       });
     }
 
-    async function removeItem(itemId) {
+    async function removeItem(itemId, cartId, name) {
       try {
-        await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, {
-          headers: { "Authorization": "Bearer " + THINGER_TOKEN }
-        });
-        allCartData = allCartData.filter(i => i.id !== itemId);
+        await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, { headers: { "Authorization": "Bearer " + THINGER_TOKEN } });
+        // Update local data
+        if (allCartData[cartId] && allCartData[cartId][name]) {
+          allCartData[cartId][name].qty -= 1;
+          if (allCartData[cartId][name].qty <= 0) delete allCartData[cartId][name];
+        }
         renderCarts();
-      } catch (err) {
-        console.error("Failed to remove item:", err);
-      }
+      } catch (err) { console.error("Failed to remove item:", err); }
     }
 
-    // Checkout cart → clears all items for a cartId
     async function checkoutCart(cartId) {
-      const itemsToRemove = allCartData.filter(i => i.cartId === cartId);
+      if (!allCartData[cartId]) return;
+      const items = Object.values(allCartData[cartId]);
       try {
-        for (const item of itemsToRemove) {
-          await axios.delete(`${THINGER_BUCKET_URL}/${item.id}`, {
-            headers: { "Authorization": "Bearer " + THINGER_TOKEN }
-          });
+        for (const item of items) {
+          await axios.delete(`${THINGER_BUCKET_URL}/${item.id}`, { headers: { "Authorization": "Bearer " + THINGER_TOKEN } });
         }
-        allCartData = allCartData.filter(i => i.cartId !== cartId);
+        delete allCartData[cartId];
         renderCarts();
-        alert(`Cart ${cartId} has been checked out and cleared!`);
+        alert(`Cart ${cartId} checked out and cleared!`);
       } catch (err) {
         console.error("Checkout failed:", err);
         alert("Checkout failed. Check console.");
       }
     }
 
+    // Fetch data every 2 seconds for real-time updates
+    setInterval(fetchAllCarts, 2000);
     window.onload = fetchAllCarts;
   </script>
 </body>
