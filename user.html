@@ -132,13 +132,17 @@
     }
 
     async function removeItem(itemId) {
-      cartData = cartData.filter(item => item.id !== itemId);
-      updateCartTable();
+  cartData = cartData.filter(item => item.id !== itemId);
+  updateCartTable();
 
-      try {
-        await axios.delete(`${THINGER_BUCKET_URL}/${item.id}`, { headers: { "Authorization": "Bearer " + THINGER_TOKEN } });
-      } catch (err) { console.error("Failed to remove item:", err); }
-    }
+  try {
+    await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, {
+      headers: { "Authorization": "Bearer " + THINGER_TOKEN }
+    });
+  } catch (err) {
+    console.error("Failed to remove item:", err);
+  }
+}
 
     // Fetch data every 2 seconds for real-time feel
     setInterval(fetchCartData, 2000);
@@ -146,6 +150,7 @@
   </script>
 </body>
 </html>
+
 
 
 
