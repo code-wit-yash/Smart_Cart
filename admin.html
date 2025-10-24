@@ -60,7 +60,7 @@
             carts[cartId][name].qty += 1;
           } else {
             carts[cartId][name] = {
-              id: item.eventId,
+              id: item._id || item.eventId, 
               name: name,
               price: item.price,
               qty: 1,
@@ -144,7 +144,7 @@
 
     async function removeItem(itemId, cartId, name) {
       try {
-        await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, { headers: { "Authorization": "Bearer " + THINGER_TOKEN } });
+        await axios.delete(`${THINGER_BUCKET_URL}/${item.id}`, { headers: { "Authorization": "Bearer " + THINGER_TOKEN } });
         if (allCartData[cartId] && allCartData[cartId][name]) {
           allCartData[cartId][name].qty -= 1;
           if (allCartData[cartId][name].qty <= 0) delete allCartData[cartId][name];
@@ -177,4 +177,5 @@
   </script>
 </body>
 </html>
+
 
