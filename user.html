@@ -64,20 +64,22 @@
     document.getElementById("cartIdDisplay").innerText = cartId;
 
     const THINGER_BUCKET_URL = "https://api.thinger.io/v2/users/yash7642/buckets/cart_events/data";  
-        
-    const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4"; // Replace
+    const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4";
 
     let cartData = [];
 
+    // Fetch cart data
     async function fetchCartData() {
       try {
         const response = await axios.get(THINGER_BUCKET_URL, {
           headers: { "Authorization": "Bearer " + THINGER_TOKEN }
         });
 
-        const rawData = response.data.filter(item => item.cartId === cartId);
+        // Filter by cart ID and ignore removed items
+        const rawData = response.data.filter(item => item.cartId === cartId && item.action !== "REMOVED");
+
         const mapped = rawData.map(item => ({
-          id: item._id || item.eventId,  
+          id: item._id || item.eventId,
           name: item.item,
           price: item.price,
           qty: 1,
@@ -94,7 +96,7 @@
 
         const newCartData = Object.values(aggregated);
 
-        // Check if data changed
+        // Update UI if data changed
         if (JSON.stringify(newCartData) !== JSON.stringify(cartData)) {
           cartData = newCartData;
           updateCartTable();
@@ -105,6 +107,7 @@
       }
     }
 
+    // Update table UI
     function updateCartTable() {
       const cartTable = document.getElementById("cartTable");
       let totalItems = 0, totalAmount = 0;
@@ -117,12 +120,12 @@
 
         cartTable.innerHTML += `
           <tr>
-            <td>${item.name}${item.action==="UNKNOWN" ? " ❌" : ""}</td>
+            <td>${item.name}${item.action === "UNKNOWN" ? " ❌" : ""}</td>
             <td>₹${item.price.toFixed(2)}</td>
             <td>${item.qty}</td>
             <td>₹${subtotal.toFixed(2)}</td>
             <td>${item.time}</td>
-            <td><button class="btn-remove" onclick="removeItem('${item.id}')">❌ Remove</button></td>
+            <td><button class="btn-remove" onclick="removeItem('${item.id}', '${item.name}')">❌ Remove</button></td>
           </tr>
         `;
       });
@@ -131,26 +134,33 @@
       document.getElementById("totalAmount").innerText = "₹" + totalAmount.toFixed(2);
     }
 
-    async function removeItem(itemId) {
-  cartData = cartData.filter(item => item.id !== itemId);
-  updateCartTable();
+    // Logically remove item
+    async function removeItem(itemId, itemName) {
+      // Remove locally
+      cartData = cartData.filter(item => item.id !== itemId);
+      updateCartTable();
 
-  try {
-    await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, {
-      headers: { "Authorization": "Bearer " + THINGER_TOKEN }
-    });
-  } catch (err) {
-    console.error("Failed to remove item:", err);
-  }
-}
+      // Send a "REMOVED" event to Thinger
+      try {
+        await axios.post(THINGER_BUCKET_URL, {
+          cartId: cartId,
+          eventId: itemId,
+          item: itemName,
+          action: "REMOVED",
+          timestamp: new Date().toISOString()
+        }, {
+          headers: { "Authorization": "Bearer " + THINGER_TOKEN }
+        });
 
-    // Fetch data every 2 seconds for real-time feel
+        console.log(`Marked ${itemName} as removed.`);
+      } catch (err) {
+        console.error("Failed to log removal:", err);
+      }
+    }
+
+    // Fetch data every 2 seconds for real-time update
     setInterval(fetchCartData, 2000);
     window.onload = fetchCartData;
   </script>
 </body>
 </html>
-
-
-
-
