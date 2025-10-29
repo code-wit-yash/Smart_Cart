@@ -3,173 +3,119 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🛒 Smart Cart</title>
+  <title>Smart Cart - User</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-
   <style>
-    body { font-family: 'Poppins', sans-serif; background: linear-gradient(to right, #74ebd5, #ACB6E5); }
+    body { font-family: 'Poppins', sans-serif; background: #f0f2f5; }
     .navbar { background: linear-gradient(90deg, #007bff, #00c6ff); }
-    .navbar-brand { font-weight: 600; color: white !important; }
-    .cart-card { border-radius: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.1); }
-    .table thead { background: #007bff; color: white; }
-    .total-card { background: linear-gradient(135deg, #00c6ff, #007bff); color: white; border-radius: 15px; padding: 20px; text-align: center; }
-    .btn-remove { background: #ff4d4d; border: none; color: white; border-radius: 8px; padding: 5px 10px; cursor: pointer; transition: 0.3s; }
-    .btn-remove:hover { background: #e60000; }
-    .btn-clear { background: #6c757d; border: none; color: white; border-radius: 8px; padding: 10px 20px; margin-top: 10px; cursor: pointer; }
-    .btn-clear:hover { background: #5a6268; }
+    .navbar-brand { color: white !important; font-weight: 600; }
+    .btn-remove { background: #ff4d4d; border-radius: 6px; color: white; border: none; padding: 4px 10px; }
+    .btn-remove:hover { background: #d80000; }
+    .total-box { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.1); }
   </style>
 </head>
 <body>
 
-  <nav class="navbar navbar-expand-lg">
-    <div class="container">
-      <a class="navbar-brand" href="#">🛒 Smart Cart</a>
-    </div>
-  </nav>
+<nav class="navbar px-3">
+  <a class="navbar-brand" href="#">🛍️ My Smart Cart</a>
+</nav>
 
-  <div class="container my-5">
-    <div class="row">
-      <div class="col-lg-8">
-        <div class="card cart-card p-3">
-          <h4 class="mb-3">Your Items</h4>
-          <p><b>Cart ID:</b> <span id="cartIdDisplay">Loading...</span></p>
-          <button class="btn-clear" onclick="clearRemovedItems()">🗑️ Clear Removed Items History</button>
-          <table class="table align-middle mt-3">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Price (₹)</th>
-                <th>Qty</th>
-                <th>Subtotal</th>
-                <th>Time Added</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="cartTable"></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="col-lg-4 mt-4 mt-lg-0">
-        <div class="total-card">
-          <h5>Total Items</h5>
-          <h2 id="totalItems">0</h2>
-          <h5>Grand Total</h5>
-          <h2 id="totalAmount">₹0</h2>
-        </div>
-      </div>
-    </div>
+<div class="container my-4">
+  <h3>Your Items</h3>
+  <table class="table table-striped">
+    <thead><tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th></th></tr></thead>
+    <tbody id="cartTable"></tbody>
+  </table>
+
+  <div class="total-box">
+    <h4>Total: ₹<span id="totalPrice">0.00</span></h4>
   </div>
+</div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    const cartId = new URLSearchParams(window.location.search).get("cartId") || "CART_001";
-    document.getElementById("cartIdDisplay").innerText = cartId;
+const THINGER_BUCKET_URL = "https://api.thinger.io/v2/users/yash7642/buckets/cart_events/data";
+const THINGER_TOKEN = "YOUR_TOKEN";
+const cartId = "demo_cart_1"; // Your cart ID
 
-    const THINGER_BUCKET_URL = "https://api.thinger.io/v2/users/yash7642/buckets/cart_events/data";  
-    const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4";
+let cartData = {};
+let removedItemIds = {};
 
-    let cartData = [];
-    let removedItemIds = new Set();
+// ✅ Shared real-time communication channel
+const syncChannel = new BroadcastChannel("cart_sync_channel");
 
-    function loadRemovedItems() {
-      const stored = localStorage.getItem(`removed_${cartId}`);
-      if (stored) removedItemIds = new Set(JSON.parse(stored));
+function broadcastUpdate() {
+  syncChannel.postMessage({ type: "update_removed_items" });
+}
+
+syncChannel.onmessage = () => {
+  loadRemovedItems();
+  fetchCartData();
+};
+
+function loadRemovedItems() {
+  const saved = localStorage.getItem("admin_removed_items");
+  removedItemIds = saved ? JSON.parse(saved) : {};
+}
+
+function saveRemovedItems() {
+  localStorage.setItem("admin_removed_items", JSON.stringify(removedItemIds));
+}
+
+async function fetchCartData() {
+  const res = await axios.get(THINGER_BUCKET_URL, { headers: { Authorization: "Bearer " + THINGER_TOKEN } });
+  const items = res.data.filter(e => e.cartId === cartId);
+
+  cartData = {};
+
+  items.forEach(item => {
+    const id = item._id || item.eventId;
+    if (removedItemIds[cartId]?.includes(id)) return;
+
+    if (!cartData[item.item]) {
+      cartData[item.item] = { price: item.price, qty: 1, ids: [id] };
+    } else {
+      cartData[item.item].qty++;
+      cartData[item.item].ids.push(id);
     }
+  });
 
-    function saveRemovedItems() {
-      localStorage.setItem(`removed_${cartId}`, JSON.stringify([...removedItemIds]));
-    }
+  renderCart();
+}
 
-    function clearRemovedItems() {
-      removedItemIds.clear();
-      localStorage.removeItem(`removed_${cartId}`);
-      fetchCartData();
-      alert("Removed items history cleared!");
-    }
+function renderCart() {
+  const table = document.getElementById("cartTable");
+  table.innerHTML = "";
 
-    async function fetchCartData() {
-      try {
-        const res = await axios.get(THINGER_BUCKET_URL, { headers: { "Authorization": "Bearer " + THINGER_TOKEN } });
-        const activeData = res.data.filter(item => item.cartId === cartId && item.action !== "REMOVED" && !removedItemIds.has(item._id || item.eventId));
+  let total = 0;
+  Object.keys(cartData).forEach(name => {
+    const item = cartData[name];
+    const sum = item.price * item.qty;
+    total += sum;
 
-        const mapped = activeData.map(item => ({
-          id: item._id || item.eventId,
-          name: item.item,
-          price: item.price,
-          qty: 1,
-          time: new Date(item.timestamp).toLocaleTimeString(),
-          action: item.action
-        }));
+    table.innerHTML += `
+      <tr>
+        <td>${name}</td><td>₹${item.price.toFixed(2)}</td>
+        <td>${item.qty}</td><td>₹${sum.toFixed(2)}</td>
+        <td><button class="btn-remove" onclick="removeItem('${name}')">❌</button></td>
+      </tr>`;
+  });
 
-        const aggregated = {};
-        mapped.forEach(item => {
-          if (aggregated[item.name]) {
-            aggregated[item.name].qty++;
-            aggregated[item.name].ids.push(item.id);
-          } else {
-            aggregated[item.name] = { ...item, ids: [item.id] };
-          }
-        });
+  document.getElementById("totalPrice").innerText = total.toFixed(2);
+}
 
-        const newCartData = Object.values(aggregated);
-        if (JSON.stringify(newCartData) !== JSON.stringify(cartData)) {
-          cartData = newCartData;
-          updateCartTable();
-        }
+function removeItem(name) {
+  const id = cartData[name].ids[0];
+  if (!removedItemIds[cartId]) removedItemIds[cartId] = [];
+  removedItemIds[cartId].push(id);
+  saveRemovedItems();
+  broadcastUpdate(); // ✅ Sync to admin
+  fetchCartData();
+}
 
-      } catch (err) {
-        console.error("Error:", err);
-      }
-    }
-
-    function updateCartTable() {
-      const cartTable = document.getElementById("cartTable");
-      let totalItems = 0, totalAmount = 0;
-      cartTable.innerHTML = "";
-
-      cartData.forEach(item => {
-        const subtotal = item.price * item.qty;
-        totalItems += item.qty;
-        totalAmount += subtotal;
-        const safeName = item.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-
-        cartTable.innerHTML += `
-          <tr>
-            <td>${item.name}${item.action === "UNKNOWN" ? " ❌" : ""}</td>
-            <td>₹${item.price.toFixed(2)}</td>
-            <td>${item.qty}</td>
-            <td>₹${subtotal.toFixed(2)}</td>
-            <td>${item.time}</td>
-            <td><button class="btn-remove" onclick="removeItem('${safeName}')">❌ Remove</button></td>
-          </tr>
-        `;
-      });
-
-      document.getElementById("totalItems").innerText = totalItems;
-      document.getElementById("totalAmount").innerText = "₹" + totalAmount.toFixed(2);
-    }
-
-    function removeItem(itemName) {
-      const item = cartData.find(i => i.name === itemName);
-      if (!item) return;
-      const itemIdToRemove = item.ids[0];
-      removedItemIds.add(itemIdToRemove);
-      saveRemovedItems();
-      fetchCartData();
-    }
-
-    // ✅ Sync with Admin page in real-time
-    window.addEventListener("storage", () => {
-      console.log("Detected change from Admin — Updating Cart");
-      loadRemovedItems();
-      fetchCartData();
-    });
-
-    loadRemovedItems();
-    setInterval(fetchCartData, 2000);
-    window.onload = fetchCartData;
+loadRemovedItems();
+setInterval(fetchCartData, 5000);
+fetchCartData();
 </script>
 
 </body>
