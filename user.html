@@ -90,8 +90,11 @@
         // Aggregate repeated items
         const aggregated = {};
         mapped.forEach(item => {
-          if (aggregated[item.name]) aggregated[item.name].qty += 1;
-          else aggregated[item.name] = { ...item };
+          if (aggregated[item.name]) {
+            aggregated[item.name].qty += 1;
+          } else {
+            aggregated[item.name] = { ...item };
+          }
         });
 
         const newCartData = Object.values(aggregated);
@@ -134,27 +137,22 @@
       document.getElementById("totalAmount").innerText = "₹" + totalAmount.toFixed(2);
     }
 
-    // Logically remove item
+    // Remove item using DELETE API
     async function removeItem(itemId, itemName) {
-      // Remove locally
-      cartData = cartData.filter(item => item.id !== itemId);
-      updateCartTable();
-
-      // Send a "REMOVED" event to Thinger
       try {
-        await axios.post(THINGER_BUCKET_URL, {
-          cartId: cartId,
-          eventId: itemId,
-          item: itemName,
-          action: "REMOVED",
-          timestamp: new Date().toISOString()
-        }, {
+        // DELETE the item from Thinger.io bucket
+        await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, {
           headers: { "Authorization": "Bearer " + THINGER_TOKEN }
         });
 
-        console.log(`Marked ${itemName} as removed.`);
+        console.log(`Successfully deleted ${itemName} (ID: ${itemId})`);
+        
+        // Immediately refresh cart data
+        await fetchCartData();
+
       } catch (err) {
-        console.error("Failed to log removal:", err);
+        console.error("Failed to remove item:", err);
+        alert("Failed to remove item. Please try again.");
       }
     }
 
