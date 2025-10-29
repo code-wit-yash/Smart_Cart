@@ -73,6 +73,22 @@
     let cartData = [];
     let removedItemIds = new Set();
 
+  // Create a shared channel for real-time sync
+const syncChannel = new BroadcastChannel("cart_sync_channel");
+
+// Whenever we update removed items → broadcast to other tabs
+function broadcastUpdate() {
+  syncChannel.postMessage({ type: "update_removed_items" });
+}
+
+// When any tab receives update → reload removed items + re-render
+syncChannel.onmessage = (e) => {
+  if (e.data.type === "update_removed_items") {
+    loadRemovedItems();
+    fetchAllCarts();
+  }
+};
+
     function loadRemovedItems() {
       const stored = localStorage.getItem(`removed_${cartId}`);
       if (stored) removedItemIds = new Set(JSON.parse(stored));
@@ -157,6 +173,7 @@
       const itemIdToRemove = item.ids[0];
       removedItemIds.add(itemIdToRemove);
       saveRemovedItems();
+      broadcastUpdate(); // ✅ Sync to admin
       fetchCartData();
     }
 
@@ -174,3 +191,4 @@
 
 </body>
 </html>
+
