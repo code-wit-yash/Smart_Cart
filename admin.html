@@ -48,6 +48,23 @@ let openCartId = null;
 // ✅ Removed item ids now stored in localStorage shared across user/admin tabs
 let removedItemIds = {};
 
+// Create a shared channel for real-time sync
+const syncChannel = new BroadcastChannel("cart_sync_channel");
+
+// Whenever we update removed items → broadcast to other tabs
+function broadcastUpdate() {
+  syncChannel.postMessage({ type: "update_removed_items" });
+}
+
+// When any tab receives update → reload removed items + re-render
+syncChannel.onmessage = (e) => {
+  if (e.data.type === "update_removed_items") {
+    loadRemovedItems();
+    fetchAllCarts();
+  }
+};
+
+
 function loadRemovedItems() {
   const stored = localStorage.getItem('admin_removed_items');
   if (stored) {
@@ -169,6 +186,7 @@ function removeItem(cartId, itemName) {
   if (!removedItemIds[cartId]) removedItemIds[cartId] = new Set();
   removedItemIds[cartId].add(itemId);
   saveRemovedItems();
+  broadcastUpdate();
   fetchAllCarts();
 }
 
@@ -178,6 +196,7 @@ function checkoutCart(cartId) {
     if (!removedItemIds[cartId]) removedItemIds[cartId] = new Set();
     items.forEach(i => i.ids.forEach(id => removedItemIds[cartId].add(id)));
     saveRemovedItems();
+    broadcastUpdate();
     fetchAllCarts();
   }
 }
@@ -185,6 +204,7 @@ function checkoutCart(cartId) {
 function clearCartRemovedItems(cartId) {
   delete removedItemIds[cartId];
   saveRemovedItems();
+  broadcastUpdate();
   fetchAllCarts();
 }
 
@@ -201,3 +221,4 @@ window.onload = fetchAllCarts;
 
 </body>
 </html>
+
