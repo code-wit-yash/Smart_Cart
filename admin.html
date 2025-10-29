@@ -58,9 +58,12 @@
           if (!carts[cartId]) carts[cartId] = {};
           if (carts[cartId][name]) {
             carts[cartId][name].qty += 1;
+            // Store all IDs for this item
+            carts[cartId][name].ids.push(item._id || item.eventId);
           } else {
             carts[cartId][name] = {
               id: item._id || item.eventId, 
+              ids: [item._id || item.eventId], // Store all IDs
               name: name,
               price: item.price,
               qty: 1,
@@ -128,7 +131,7 @@
                         <td>₹${(item.price * item.qty).toFixed(2)}</td>
                         <td>${item.time}</td>
                         <td>${item.scanned ? "✅" : "❌"}</td>
-                        <td><button class="btn-remove" onclick="removeItem('${item.id}', '${cartId}', '${item.name}')">❌ Remove</button></td>
+                        <td><button class="btn-remove" onclick="removeItem('${cartId}', '${item.name}')">❌ Remove</button></td>
                       </tr>
                     `).join('')}
                   </tbody>
@@ -142,29 +145,56 @@
       });
     }
 
-    async function removeItem(itemId, cartId, name) {
+    async function removeItem(cartId, itemName) {
+      if (!allCartData[cartId] || !allCartData[cartId][itemName]) {
+        console.error("Item not found in cart");
+        return;
+      }
+
       try {
-        await axios.delete(`${THINGER_BUCKET_URL}/${item.id}`, { headers: { "Authorization": "Bearer " + THINGER_TOKEN } });
-        if (allCartData[cartId] && allCartData[cartId][name]) {
-          allCartData[cartId][name].qty -= 1;
-          if (allCartData[cartId][name].qty <= 0) delete allCartData[cartId][name];
-        }
-        renderCarts();
+        const item = allCartData[cartId][itemName];
+        
+        // Delete one instance (the first ID in the array)
+        const idToDelete = item.ids[0];
+        
+        await axios.delete(`${THINGER_BUCKET_URL}/${idToDelete}`, { 
+          headers: { "Authorization": "Bearer " + THINGER_TOKEN } 
+        });
+        
+        console.log(`Successfully deleted ${itemName} (ID: ${idToDelete})`);
+        
+        // Refresh data immediately
+        await fetchAllCarts();
+        
       } catch (err) {
         console.error("Failed to remove item:", err);
+        alert("Failed to remove item. Check console for details.");
       }
     }
 
     async function checkoutCart(cartId) {
       if (!allCartData[cartId]) return;
+      
       const items = Object.values(allCartData[cartId]);
+      
       try {
+        // Delete all items in this cart
         for (const item of items) {
-          await axios.delete(`${THINGER_BUCKET_URL}/${item.id}`, { headers: { "Authorization": "Bearer " + THINGER_TOKEN } });
+          // Delete all IDs associated with this item
+          for (const id of item.ids) {
+            await axios.delete(`${THINGER_BUCKET_URL}/${id}`, { 
+              headers: { "Authorization": "Bearer " + THINGER_TOKEN } 
+            });
+          }
         }
-        delete allCartData[cartId];
-        renderCarts();
+        
+        console.log(`Cart ${cartId} checked out successfully`);
+        
+        // Refresh data
+        await fetchAllCarts();
+        
         alert(`Cart ${cartId} checked out and cleared!`);
+        
       } catch (err) {
         console.error("Checkout failed:", err);
         alert("Checkout failed. Check console.");
@@ -177,5 +207,3 @@
   </script>
 </body>
 </html>
-
-
