@@ -17,6 +17,8 @@
     .btn-remove { background: #ff4d4d; border: none; color: white; border-radius: 8px; padding: 5px 10px; cursor: pointer; transition: 0.3s; }
     .btn-remove:hover { background: #e60000; }
     .btn-remove:disabled { background: #ccc; cursor: not-allowed; }
+    .btn-clear { background: #6c757d; border: none; color: white; border-radius: 8px; padding: 10px 20px; margin-top: 10px; cursor: pointer; }
+    .btn-clear:hover { background: #5a6268; }
   </style>
 </head>
 <body>
@@ -33,7 +35,8 @@
         <div class="card cart-card p-3">
           <h4 class="mb-3">Your Items</h4>
           <p><b>Cart ID:</b> <span id="cartIdDisplay">Loading...</span></p>
-          <table class="table align-middle">
+          <button class="btn-clear" onclick="clearRemovedItems()">🗑️ Clear Removed Items History</button>
+          <table class="table align-middle mt-3">
             <thead>
               <tr>
                 <th>Item</th>
@@ -68,7 +71,30 @@
     const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4";
 
     let cartData = [];
-    let allRawData = []; // Store all raw data for removal tracking
+    
+    // Track removed items in memory (persists during session)
+    let removedItemIds = new Set();
+
+    // Load removed items from memory on page load
+    function loadRemovedItems() {
+      const stored = sessionStorage.getItem(`removed_${cartId}`);
+      if (stored) {
+        removedItemIds = new Set(JSON.parse(stored));
+      }
+    }
+
+    // Save removed items to session storage
+    function saveRemovedItems() {
+      sessionStorage.setItem(`removed_${cartId}`, JSON.stringify([...removedItemIds]));
+    }
+
+    // Clear removed items history
+    function clearRemovedItems() {
+      removedItemIds.clear();
+      sessionStorage.removeItem(`removed_${cartId}`);
+      fetchCartData();
+      alert("Removed items history cleared!");
+    }
 
     // Fetch cart data
     async function fetchCartData() {
@@ -77,11 +103,11 @@
           headers: { "Authorization": "Bearer " + THINGER_TOKEN }
         });
 
-        allRawData = response.data;
-
-        // Filter by cart ID and ignore removed items
-        const activeData = allRawData.filter(item => 
-          item.cartId === cartId && item.action !== "REMOVED"
+        // Filter by cart ID and exclude items in removedItemIds
+        const activeData = response.data.filter(item => 
+          item.cartId === cartId && 
+          item.action !== "REMOVED" &&
+          !removedItemIds.has(item._id || item.eventId)
         );
 
         const mapped = activeData.map(item => ({
@@ -128,6 +154,8 @@
         totalItems += item.qty;
         totalAmount += subtotal;
 
+        const safeName = item.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        
         cartTable.innerHTML += `
           <tr>
             <td>${item.name}${item.action === "UNKNOWN" ? " ❌" : ""}</td>
@@ -135,7 +163,7 @@
             <td>${item.qty}</td>
             <td>₹${subtotal.toFixed(2)}</td>
             <td>${item.time}</td>
-            <td><button class="btn-remove" id="btn-${item.name.replace(/\s+/g, '-')}" onclick="removeItem('${item.name.replace(/'/g, "\\'")}')">❌ Remove</button></td>
+            <td><button class="btn-remove" onclick="removeItem('${safeName}')">❌ Remove</button></td>
           </tr>
         `;
       });
@@ -144,55 +172,27 @@
       document.getElementById("totalAmount").innerText = "₹" + totalAmount.toFixed(2);
     }
 
-    // Mark item as REMOVED by writing new entry to bucket
-    async function removeItem(itemName) {
+    // Remove item by marking it in removedItemIds
+    function removeItem(itemName) {
       const item = cartData.find(i => i.name === itemName);
       if (!item) return;
 
-      // Disable button to prevent double clicks
-      const btnId = `btn-${itemName.replace(/\s+/g, '-')}`;
-      const btn = document.getElementById(btnId);
-      if (btn) {
-        btn.disabled = true;
-        btn.innerText = "Removing...";
-      }
-
-      try {
-        // Get the first ID for this item to mark as removed
-        const itemIdToRemove = item.ids[0];
-
-        // Write a REMOVED event to the bucket
-        await axios.post(THINGER_BUCKET_URL, {
-          cartId: cartId,
-          eventId: itemIdToRemove,
-          item: itemName,
-          price: item.price,
-          action: "REMOVED",
-          timestamp: new Date().toISOString()
-        }, {
-          headers: { 
-            "Authorization": "Bearer " + THINGER_TOKEN,
-            "Content-Type": "application/json"
-          }
-        });
-
-        console.log(`Marked ${itemName} as REMOVED (ID: ${itemIdToRemove})`);
-        
-        // Immediately refresh to show updated cart
-        setTimeout(fetchCartData, 500);
-
-      } catch (err) {
-        console.error("Failed to remove item:", err);
-        alert("Failed to remove item. Please try again.");
-        
-        // Re-enable button on error
-        if (btn) {
-          btn.disabled = false;
-          btn.innerText = "❌ Remove";
-        }
-      }
+      // Mark the first ID as removed
+      const itemIdToRemove = item.ids[0];
+      removedItemIds.add(itemIdToRemove);
+      
+      // Save to session storage
+      saveRemovedItems();
+      
+      console.log(`Marked ${itemName} as removed (ID: ${itemIdToRemove})`);
+      
+      // Immediately refresh cart
+      fetchCartData();
     }
 
+    // Load removed items on startup
+    loadRemovedItems();
+    
     // Fetch data every 2 seconds for real-time update
     setInterval(fetchCartData, 2000);
     window.onload = fetchCartData;
