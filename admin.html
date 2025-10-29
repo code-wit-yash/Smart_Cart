@@ -45,18 +45,14 @@ const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2Nh
 let allCartData = {};
 let openCartId = null;
 
-// ✅ Removed item ids now stored in localStorage shared across user/admin tabs
+// ✅ Shared removed item memory
 let removedItemIds = {};
 
-// Create a shared channel for real-time sync
+// ✅ BroadcastChannel for live sync between User ↔ Admin
 const syncChannel = new BroadcastChannel("cart_sync_channel");
-
-// Whenever we update removed items → broadcast to other tabs
 function broadcastUpdate() {
   syncChannel.postMessage({ type: "update_removed_items" });
 }
-
-// When any tab receives update → reload removed items + re-render
 syncChannel.onmessage = (e) => {
   if (e.data.type === "update_removed_items") {
     loadRemovedItems();
@@ -64,111 +60,89 @@ syncChannel.onmessage = (e) => {
   }
 };
 
-
+// ✅ Load Removed Items from Storage
 function loadRemovedItems() {
   const stored = localStorage.getItem('admin_removed_items');
-  if (stored) {
-    const parsed = JSON.parse(stored);
-    Object.keys(parsed).forEach(cartId => {
-      removedItemIds[cartId] = new Set(parsed[cartId]);
-    });
-  }
+  removedItemIds = stored ? JSON.parse(stored) : {};
+  Object.keys(removedItemIds).forEach(id => removedItemIds[id] = new Set(removedItemIds[id]));
 }
 
+// ✅ Save Removed Items to Storage
 function saveRemovedItems() {
-  const toSave = {};
-  Object.keys(removedItemIds).forEach(cartId => {
-    toSave[cartId] = [...removedItemIds[cartId]];
-  });
-  localStorage.setItem('admin_removed_items', JSON.stringify(toSave));
+  const obj = {};
+  Object.keys(removedItemIds).forEach(id => obj[id] = [...removedItemIds[id]]);
+  localStorage.setItem('admin_removed_items', JSON.stringify(obj));
 }
 
 function clearAllRemovedItems() {
-  if (confirm("Clear removal history for all carts?")) {
-    removedItemIds = {};
-    localStorage.removeItem('admin_removed_items');
-    fetchAllCarts();
-    alert("All removed history cleared!");
-  }
+  if (!confirm("Clear removal history for ALL carts?")) return;
+  removedItemIds = {};
+  localStorage.removeItem('admin_removed_items');
+  broadcastUpdate();
+  fetchAllCarts();
 }
 
+// ✅ Fetch Live Cart Data
 async function fetchAllCarts() {
   try {
-    const res = await axios.get(THINGER_BUCKET_URL, {
-      headers: { "Authorization": "Bearer " + THINGER_TOKEN }
-    });
-
-    const rawData = res.data;
+    const res = await axios.get(THINGER_BUCKET_URL, { headers: { Authorization: "Bearer " + THINGER_TOKEN } });
+    const raw = res.data;
     const carts = {};
 
-    rawData.forEach(item => {
-      const cartId = item.cartId;
-      const itemId = item._id || item.eventId;
+    raw.forEach(ev => {
+      const cartId = ev.cartId;
+      const itemId = ev._id || ev.eventId;
       if (!carts[cartId]) carts[cartId] = {};
-
-      if (item.action === "REMOVED") return;
+      if (ev.action === "REMOVED") return;
       if (removedItemIds[cartId] && removedItemIds[cartId].has(itemId)) return;
 
-      if (carts[cartId][item.item]) {
-        carts[cartId][item.item].qty++;
-        carts[cartId][item.item].ids.push(itemId);
-      } else {
-        carts[cartId][item.item] = {
-          name: item.item,
-          price: item.price,
-          qty: 1,
-          ids: [itemId],
-          time: new Date(item.timestamp).toLocaleTimeString(),
-          scanned: item.action !== "UNKNOWN"
-        };
+      if (!carts[cartId][ev.item]) {
+        carts[cartId][ev.item] = { name: ev.item, price: ev.price, qty: 0, ids: [], time: new Date(ev.timestamp).toLocaleTimeString(), scanned: ev.action !== "UNKNOWN" };
       }
+      carts[cartId][ev.item].qty++;
+      carts[cartId][ev.item].ids.push(itemId);
     });
 
     if (JSON.stringify(carts) !== JSON.stringify(allCartData)) {
       allCartData = carts;
       renderCarts();
     }
-
-  } catch (err) {
-    console.error("Error fetching data:", err);
-  }
+  } catch (err) { console.error(err); }
 }
 
+// ✅ Render UI
 function renderCarts() {
-  const accordion = document.getElementById("cartsAccordion");
-  accordion.innerHTML = "";
+  const acc = document.getElementById("cartsAccordion");
+  acc.innerHTML = "";
 
   Object.keys(allCartData).forEach((cartId, idx) => {
     const items = Object.values(allCartData[cartId]);
-    const totalAmount = items.reduce((sum, i) => sum + i.price * i.qty, 0);
-    const unscanned = items.some(i => !i.scanned);
-    const alertMsg = unscanned ? "❗ Unscanned Item" : "";
+    const total = items.reduce((s, i) => s + i.price * i.qty, 0);
+    const flag = items.some(i => !i.scanned) ? "❗ Unscanned Item" : "";
 
-    accordion.innerHTML += `
+    acc.innerHTML += `
       <div class="accordion-item">
         <h2 class="accordion-header">
           <button class="accordion-button ${cartId === openCartId ? '' : 'collapsed'}"
             data-bs-toggle="collapse" data-bs-target="#cart${idx}" onclick="openCartId='${cartId}'">
-            Cart ID: ${cartId} | Total: ₹${totalAmount.toFixed(2)} | <span class="alerts">${alertMsg}</span>
+            Cart: ${cartId} | Total: ₹${total.toFixed(2)} <span class="alerts">${flag}</span>
           </button>
         </h2>
         <div id="cart${idx}" class="accordion-collapse collapse ${cartId === openCartId ? 'show' : ''}">
           <div class="accordion-body">
             <table class="table align-middle">
-              <thead>
-                <tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th>Time</th><th>Scan</th><th>Action</th></tr>
-              </thead>
+              <thead><tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th>Time</th><th>Scan</th><th>Action</th></tr></thead>
               <tbody>
-                ${items.map(item => `
-                  <tr>
-                    <td>${item.name}</td>
-                    <td>₹${item.price.toFixed(2)}</td>
-                    <td>${item.qty}</td>
-                    <td>₹${(item.price * item.qty).toFixed(2)}</td>
-                    <td>${item.time}</td>
-                    <td>${item.scanned ? "✅" : "❌"}</td>
-                    <td><button class="btn-remove" onclick="removeItem('${cartId}', '${item.name.replace(/'/g,"\\'")}')">❌</button></td>
-                  </tr>`).join('')}
+                ${items.map(i => `
+                <tr>
+                  <td>${i.name}</td>
+                  <td>₹${i.price}</td>
+                  <td>${i.qty}</td>
+                  <td>₹${(i.price * i.qty).toFixed(2)}</td>
+                  <td>${i.time}</td>
+                  <td>${i.scanned ? "✅" : "❌"}</td>
+                  <td><button class="btn-remove" onclick="removeItem('${cartId}', '${i.name}')">❌</button></td>
+                </tr>`).join('')}
               </tbody>
             </table>
             <button class="btn-checkout" onclick="checkoutCart('${cartId}')">✅ Checkout</button>
@@ -179,28 +153,28 @@ function renderCarts() {
   });
 }
 
+// ✅ Remove 1 item
 function removeItem(cartId, itemName) {
   const item = allCartData[cartId][itemName];
-  const itemId = item.ids[0];
-
+  const id = item.ids[0];
   if (!removedItemIds[cartId]) removedItemIds[cartId] = new Set();
-  removedItemIds[cartId].add(itemId);
+  removedItemIds[cartId].add(id);
   saveRemovedItems();
   broadcastUpdate();
   fetchAllCarts();
 }
 
+// ✅ Checkout entire cart
 function checkoutCart(cartId) {
-  if (confirm(`Checkout cart ${cartId}?`)) {
-    const items = Object.values(allCartData[cartId]);
-    if (!removedItemIds[cartId]) removedItemIds[cartId] = new Set();
-    items.forEach(i => i.ids.forEach(id => removedItemIds[cartId].add(id)));
-    saveRemovedItems();
-    broadcastUpdate();
-    fetchAllCarts();
-  }
+  if (!confirm(`Checkout cart ${cartId}?`)) return;
+  if (!removedItemIds[cartId]) removedItemIds[cartId] = new Set();
+  Object.values(allCartData[cartId]).forEach(i => i.ids.forEach(id => removedItemIds[cartId].add(id)));
+  saveRemovedItems();
+  broadcastUpdate();
+  fetchAllCarts();
 }
 
+// ✅ Clear removed items for one cart
 function clearCartRemovedItems(cartId) {
   delete removedItemIds[cartId];
   saveRemovedItems();
@@ -208,17 +182,9 @@ function clearCartRemovedItems(cartId) {
   fetchAllCarts();
 }
 
-// ✅ Sync with User Page automatically
-window.addEventListener("storage", () => {
-  loadRemovedItems();
-  fetchAllCarts();
-});
-
 loadRemovedItems();
+fetchAllCarts();
 setInterval(fetchAllCarts, 5000);
-window.onload = fetchAllCarts;
 </script>
-
 </body>
 </html>
-
