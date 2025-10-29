@@ -85,9 +85,10 @@ function broadcastUpdate() {
 syncChannel.onmessage = (e) => {
   if (e.data.type === "update_removed_items") {
     loadRemovedItems();
-    fetchAllCarts();
+    fetchCartData(); // ✅ correct function on user side
   }
 };
+
 
     function loadRemovedItems() {
       const stored = localStorage.getItem(`removed_${cartId}`);
@@ -177,13 +178,6 @@ syncChannel.onmessage = (e) => {
       fetchCartData();
     }
 
-    // ✅ Sync with Admin page in real-time
-    window.addEventListener("storage", () => {
-      console.log("Detected change from Admin — Updating Cart");
-      loadRemovedItems();
-      fetchCartData();
-    });
-
     loadRemovedItems();
     setInterval(fetchCartData, 2000);
     window.onload = fetchCartData;
@@ -191,4 +185,5 @@ syncChannel.onmessage = (e) => {
 
 </body>
 </html>
+
 
