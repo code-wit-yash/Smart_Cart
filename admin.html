@@ -7,6 +7,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+
   <style>
     body { font-family: 'Poppins', sans-serif; background: #f0f2f5; }
     .navbar { background: linear-gradient(90deg, #007bff, #00c6ff); }
@@ -36,238 +37,167 @@
     <div class="accordion" id="cartsAccordion"></div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script>
-    const THINGER_BUCKET_URL = "https://api.thinger.io/v2/users/yash7642/buckets/cart_events/data";
-    const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4";
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const THINGER_BUCKET_URL = "https://api.thinger.io/v2/users/yash7642/buckets/cart_events/data";
+const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4";
 
-    let allCartData = {};
-    let openCartId = null;
-    
-    // Track removed items per cart in memory
-    let removedItemIds = {};
+let allCartData = {};
+let openCartId = null;
 
-    // Load removed items from session storage
-    function loadRemovedItems() {
-      const stored = sessionStorage.getItem('admin_removed_items');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Convert arrays back to Sets
-        Object.keys(parsed).forEach(cartId => {
-          removedItemIds[cartId] = new Set(parsed[cartId]);
-        });
+// ✅ Removed item ids now stored in localStorage shared across user/admin tabs
+let removedItemIds = {};
+
+function loadRemovedItems() {
+  const stored = localStorage.getItem('admin_removed_items');
+  if (stored) {
+    const parsed = JSON.parse(stored);
+    Object.keys(parsed).forEach(cartId => {
+      removedItemIds[cartId] = new Set(parsed[cartId]);
+    });
+  }
+}
+
+function saveRemovedItems() {
+  const toSave = {};
+  Object.keys(removedItemIds).forEach(cartId => {
+    toSave[cartId] = [...removedItemIds[cartId]];
+  });
+  localStorage.setItem('admin_removed_items', JSON.stringify(toSave));
+}
+
+function clearAllRemovedItems() {
+  if (confirm("Clear removal history for all carts?")) {
+    removedItemIds = {};
+    localStorage.removeItem('admin_removed_items');
+    fetchAllCarts();
+    alert("All removed history cleared!");
+  }
+}
+
+async function fetchAllCarts() {
+  try {
+    const res = await axios.get(THINGER_BUCKET_URL, {
+      headers: { "Authorization": "Bearer " + THINGER_TOKEN }
+    });
+
+    const rawData = res.data;
+    const carts = {};
+
+    rawData.forEach(item => {
+      const cartId = item.cartId;
+      const itemId = item._id || item.eventId;
+      if (!carts[cartId]) carts[cartId] = {};
+
+      if (item.action === "REMOVED") return;
+      if (removedItemIds[cartId] && removedItemIds[cartId].has(itemId)) return;
+
+      if (carts[cartId][item.item]) {
+        carts[cartId][item.item].qty++;
+        carts[cartId][item.item].ids.push(itemId);
+      } else {
+        carts[cartId][item.item] = {
+          name: item.item,
+          price: item.price,
+          qty: 1,
+          ids: [itemId],
+          time: new Date(item.timestamp).toLocaleTimeString(),
+          scanned: item.action !== "UNKNOWN"
+        };
       }
+    });
+
+    if (JSON.stringify(carts) !== JSON.stringify(allCartData)) {
+      allCartData = carts;
+      renderCarts();
     }
 
-    // Save removed items to session storage
-    function saveRemovedItems() {
-      const toSave = {};
-      Object.keys(removedItemIds).forEach(cartId => {
-        toSave[cartId] = [...removedItemIds[cartId]];
-      });
-      sessionStorage.setItem('admin_removed_items', JSON.stringify(toSave));
-    }
+  } catch (err) {
+    console.error("Error fetching data:", err);
+  }
+}
 
-    // Clear all removed items history
-    function clearAllRemovedItems() {
-      if (confirm("Clear removal history for all carts?")) {
-        removedItemIds = {};
-        sessionStorage.removeItem('admin_removed_items');
-        fetchAllCarts();
-        alert("All removed items history cleared!");
-      }
-    }
+function renderCarts() {
+  const accordion = document.getElementById("cartsAccordion");
+  accordion.innerHTML = "";
 
-    async function fetchAllCarts() {
-      try {
-        const res = await axios.get(THINGER_BUCKET_URL, {
-          headers: { "Authorization": "Bearer " + THINGER_TOKEN }
-        });
+  Object.keys(allCartData).forEach((cartId, idx) => {
+    const items = Object.values(allCartData[cartId]);
+    const totalAmount = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+    const unscanned = items.some(i => !i.scanned);
+    const alertMsg = unscanned ? "❗ Unscanned Item" : "";
 
-        const rawData = res.data;
-
-        // Aggregate items per cart, excluding removed ones
-        const carts = {};
-        rawData.forEach(item => {
-          const cartId = item.cartId;
-          const itemId = item._id || item.eventId;
-          
-          // Skip if marked as removed in Thinger or in our local tracking
-          if (item.action === "REMOVED") return;
-          if (removedItemIds[cartId] && removedItemIds[cartId].has(itemId)) return;
-
-          const name = item.item;
-
-          if (!carts[cartId]) carts[cartId] = {};
-          if (carts[cartId][name]) {
-            carts[cartId][name].qty += 1;
-            carts[cartId][name].ids.push(itemId);
-          } else {
-            carts[cartId][name] = {
-              id: itemId, 
-              ids: [itemId],
-              name: name,
-              price: item.price,
-              qty: 1,
-              time: new Date(item.timestamp).toLocaleTimeString(),
-              scanned: item.action !== "UNKNOWN"
-            };
-          }
-        });
-
-        // Check if data has changed
-        if (JSON.stringify(carts) !== JSON.stringify(allCartData)) {
-          allCartData = carts;
-          renderCarts();
-        }
-
-      } catch (err) {
-        console.error("Error fetching Thinger.io data:", err);
-      }
-    }
-
-    function renderCarts() {
-      const accordion = document.getElementById("cartsAccordion");
-      accordion.innerHTML = "";
-
-      if (Object.keys(allCartData).length === 0) {
-        accordion.innerHTML = "<p class='text-center text-muted'>No active carts</p>";
-        return;
-      }
-
-      Object.keys(allCartData).forEach((cartId, idx) => {
-        const itemsObj = allCartData[cartId];
-        const items = Object.values(itemsObj);
-        const totalAmount = items.reduce((sum, i) => sum + i.price * i.qty, 0);
-
-        const unscanned = items.some(i => !i.scanned);
-        const alertMsg = unscanned ? "❗ Unscanned Item" : "";
-
-        const collapseClass = (cartId === openCartId) ? "accordion-collapse collapse show" : "accordion-collapse collapse";
-        const buttonClass = (cartId === openCartId) ? "accordion-button" : "accordion-button collapsed";
-        const ariaExpanded = (cartId === openCartId) ? "true" : "false";
-
-        const safeCartId = cartId.replace(/'/g, "\\'");
-
-        const cardHTML = `
-          <div class="accordion-item">
-            <h2 class="accordion-header" id="heading${idx}">
-              <button class="${buttonClass}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${idx}" 
-                      aria-expanded="${ariaExpanded}" aria-controls="collapse${idx}" onclick="openCartId='${safeCartId}'">
-                Cart ID: ${cartId} | Total: ₹${totalAmount.toFixed(2)} | Alerts: <span class="alerts">${alertMsg}</span>
-              </button>
-            </h2>
-            <div id="collapse${idx}" class="${collapseClass}" aria-labelledby="heading${idx}" data-bs-parent="#cartsAccordion">
-              <div class="accordion-body">
-                <table class="table align-middle">
-                  <thead>
-                    <tr>
-                      <th>Item Name</th>
-                      <th>Price (₹)</th>
-                      <th>Qty</th>
-                      <th>Total</th>
-                      <th>Time</th>
-                      <th>Scanned</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${items.map(item => {
-                      const safeName = item.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                      return `
-                        <tr>
-                          <td>${item.name}</td>
-                          <td>₹${item.price.toFixed(2)}</td>
-                          <td>${item.qty}</td>
-                          <td>₹${(item.price * item.qty).toFixed(2)}</td>
-                          <td>${item.time}</td>
-                          <td>${item.scanned ? "✅" : "❌"}</td>
-                          <td><button class="btn-remove" onclick="removeItem('${safeCartId}', '${safeName}')">❌ Remove</button></td>
-                        </tr>
-                      `;
-                    }).join('')}
-                  </tbody>
-                </table>
-                <button class="btn btn-checkout" onclick="checkoutCart('${safeCartId}')">✅ Checkout Cart</button>
-                <button class="btn btn-clear-all" onclick="clearCartRemovedItems('${safeCartId}')">🗑️ Clear Removed</button>
-              </div>
-            </div>
+    accordion.innerHTML += `
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button ${cartId === openCartId ? '' : 'collapsed'}"
+            data-bs-toggle="collapse" data-bs-target="#cart${idx}" onclick="openCartId='${cartId}'">
+            Cart ID: ${cartId} | Total: ₹${totalAmount.toFixed(2)} | <span class="alerts">${alertMsg}</span>
+          </button>
+        </h2>
+        <div id="cart${idx}" class="accordion-collapse collapse ${cartId === openCartId ? 'show' : ''}">
+          <div class="accordion-body">
+            <table class="table align-middle">
+              <thead>
+                <tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th>Time</th><th>Scan</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                ${items.map(item => `
+                  <tr>
+                    <td>${item.name}</td>
+                    <td>₹${item.price.toFixed(2)}</td>
+                    <td>${item.qty}</td>
+                    <td>₹${(item.price * item.qty).toFixed(2)}</td>
+                    <td>${item.time}</td>
+                    <td>${item.scanned ? "✅" : "❌"}</td>
+                    <td><button class="btn-remove" onclick="removeItem('${cartId}', '${item.name.replace(/'/g,"\\'")}')">❌</button></td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+            <button class="btn-checkout" onclick="checkoutCart('${cartId}')">✅ Checkout</button>
+            <button class="btn-clear-all" onclick="clearCartRemovedItems('${cartId}')">🗑️ Clear Removed</button>
           </div>
-        `;
-        accordion.innerHTML += cardHTML;
-      });
-    }
+        </div>
+      </div>`;
+  });
+}
 
-    function removeItem(cartId, itemName) {
-      if (!allCartData[cartId] || !allCartData[cartId][itemName]) {
-        console.error("Item not found in cart");
-        return;
-      }
+function removeItem(cartId, itemName) {
+  const item = allCartData[cartId][itemName];
+  const itemId = item.ids[0];
 
-      const item = allCartData[cartId][itemName];
-      const itemIdToRemove = item.ids[0];
+  if (!removedItemIds[cartId]) removedItemIds[cartId] = new Set();
+  removedItemIds[cartId].add(itemId);
+  saveRemovedItems();
+  fetchAllCarts();
+}
 
-      // Initialize Set for this cart if needed
-      if (!removedItemIds[cartId]) {
-        removedItemIds[cartId] = new Set();
-      }
+function checkoutCart(cartId) {
+  if (confirm(`Checkout cart ${cartId}?`)) {
+    const items = Object.values(allCartData[cartId]);
+    if (!removedItemIds[cartId]) removedItemIds[cartId] = new Set();
+    items.forEach(i => i.ids.forEach(id => removedItemIds[cartId].add(id)));
+    saveRemovedItems();
+    fetchAllCarts();
+  }
+}
 
-      // Mark as removed
-      removedItemIds[cartId].add(itemIdToRemove);
-      
-      // Save to session storage
-      saveRemovedItems();
-      
-      console.log(`Marked ${itemName} as removed in cart ${cartId} (ID: ${itemIdToRemove})`);
-      
-      // Refresh cart display
-      fetchAllCarts();
-    }
+function clearCartRemovedItems(cartId) {
+  delete removedItemIds[cartId];
+  saveRemovedItems();
+  fetchAllCarts();
+}
 
-    function checkoutCart(cartId) {
-      if (!allCartData[cartId]) return;
-      
-      if (!confirm(`Checkout cart ${cartId}?`)) return;
+// ✅ Sync with User Page automatically
+window.addEventListener("storage", () => {
+  loadRemovedItems();
+  fetchAllCarts();
+});
 
-      const items = Object.values(allCartData[cartId]);
-      
-      // Mark all items in this cart as removed
-      if (!removedItemIds[cartId]) {
-        removedItemIds[cartId] = new Set();
-      }
+loadRemovedItems();
+setInterval(fetchAllCarts, 5000);
+window.onload = fetchAllCarts;
+</script>
 
-      items.forEach(item => {
-        item.ids.forEach(id => {
-          removedItemIds[cartId].add(id);
-        });
-      });
-
-      // Save to session storage
-      saveRemovedItems();
-      
-      console.log(`Cart ${cartId} checked out - all items marked as removed`);
-      
-      // Refresh display
-      fetchAllCarts();
-      
-      alert(`Cart ${cartId} checked out successfully!`);
-    }
-
-    function clearCartRemovedItems(cartId) {
-      if (confirm(`Clear removal history for cart ${cartId}?`)) {
-        delete removedItemIds[cartId];
-        saveRemovedItems();
-        fetchAllCarts();
-        alert(`Removed items history cleared for cart ${cartId}`);
-      }
-    }
-
-    // Load removed items on startup
-    loadRemovedItems();
-
-    // Auto-refresh every 5 seconds
-    setInterval(fetchAllCarts, 5000);
-    window.onload = fetchAllCarts;
-  </script>
 </body>
 </html>
