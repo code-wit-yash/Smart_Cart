@@ -62,24 +62,33 @@ syncChannel.onmessage = (e) => {
 
 // ✅ Load Removed Items from Storage
 function loadRemovedItems() {
-  const stored = localStorage.getItem('admin_removed_items');
-  removedItemIds = stored ? JSON.parse(stored) : {};
-  Object.keys(removedItemIds).forEach(id => removedItemIds[id] = new Set(removedItemIds[id]));
+  removedItemIds = {};
+  Object.keys(localStorage).forEach(key => {
+    if (key.startsWith("removed_")) {
+      const cartId = key.replace("removed_", "");
+      removedItemIds[cartId] = new Set(JSON.parse(localStorage.getItem(key)));
+    }
+  });
 }
 
 // ✅ Save Removed Items to Storage
 function saveRemovedItems() {
-  const obj = {};
-  Object.keys(removedItemIds).forEach(id => obj[id] = [...removedItemIds[id]]);
-  localStorage.setItem('admin_removed_items', JSON.stringify(obj));
+  Object.keys(removedItemIds).forEach(cartId => {
+    localStorage.setItem(`removed_${cartId}`, JSON.stringify([...removedItemIds[cartId]]));
+  });
 }
 
+
 function clearAllRemovedItems() {
-  if (!confirm("Clear removal history for ALL carts?")) return;
-  removedItemIds = {};
-  localStorage.removeItem('admin_removed_items');
-  broadcastUpdate();
-  fetchAllCarts();
+  if (confirm("Clear removal history for all carts?")) {
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith("removed_")) localStorage.removeItem(key);
+    });
+    removedItemIds = {};
+    broadcastUpdate();
+    fetchAllCarts();
+    alert("All removed history cleared!");
+  }
 }
 
 // ✅ Fetch Live Cart Data
@@ -176,11 +185,12 @@ function checkoutCart(cartId) {
 
 // ✅ Clear removed items for one cart
 function clearCartRemovedItems(cartId) {
+  localStorage.removeItem(`removed_${cartId}`);
   delete removedItemIds[cartId];
-  saveRemovedItems();
   broadcastUpdate();
   fetchAllCarts();
 }
+
 
 loadRemovedItems();
 fetchAllCarts();
@@ -188,3 +198,4 @@ setInterval(fetchAllCarts, 5000);
 </script>
 </body>
 </html>
+
