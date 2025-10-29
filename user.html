@@ -16,6 +16,7 @@
     .total-card { background: linear-gradient(135deg, #00c6ff, #007bff); color: white; border-radius: 15px; padding: 20px; text-align: center; }
     .btn-remove { background: #ff4d4d; border: none; color: white; border-radius: 8px; padding: 5px 10px; cursor: pointer; transition: 0.3s; }
     .btn-remove:hover { background: #e60000; }
+    .btn-remove:disabled { background: #ccc; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -67,6 +68,7 @@
     const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4";
 
     let cartData = [];
+    let allRawData = []; // Store all raw data for removal tracking
 
     // Fetch cart data
     async function fetchCartData() {
@@ -75,10 +77,14 @@
           headers: { "Authorization": "Bearer " + THINGER_TOKEN }
         });
 
-        // Filter by cart ID and ignore removed items
-        const rawData = response.data.filter(item => item.cartId === cartId && item.action !== "REMOVED");
+        allRawData = response.data;
 
-        const mapped = rawData.map(item => ({
+        // Filter by cart ID and ignore removed items
+        const activeData = allRawData.filter(item => 
+          item.cartId === cartId && item.action !== "REMOVED"
+        );
+
+        const mapped = activeData.map(item => ({
           id: item._id || item.eventId,
           name: item.item,
           price: item.price,
@@ -92,8 +98,9 @@
         mapped.forEach(item => {
           if (aggregated[item.name]) {
             aggregated[item.name].qty += 1;
+            aggregated[item.name].ids.push(item.id);
           } else {
-            aggregated[item.name] = { ...item };
+            aggregated[item.name] = { ...item, ids: [item.id] };
           }
         });
 
@@ -128,7 +135,7 @@
             <td>${item.qty}</td>
             <td>₹${subtotal.toFixed(2)}</td>
             <td>${item.time}</td>
-            <td><button class="btn-remove" onclick="removeItem('${item.id}', '${item.name}')">❌ Remove</button></td>
+            <td><button class="btn-remove" id="btn-${item.name.replace(/\s+/g, '-')}" onclick="removeItem('${item.name.replace(/'/g, "\\'")}')">❌ Remove</button></td>
           </tr>
         `;
       });
@@ -137,22 +144,52 @@
       document.getElementById("totalAmount").innerText = "₹" + totalAmount.toFixed(2);
     }
 
-    // Remove item using DELETE API
-    async function removeItem(itemId, itemName) {
+    // Mark item as REMOVED by writing new entry to bucket
+    async function removeItem(itemName) {
+      const item = cartData.find(i => i.name === itemName);
+      if (!item) return;
+
+      // Disable button to prevent double clicks
+      const btnId = `btn-${itemName.replace(/\s+/g, '-')}`;
+      const btn = document.getElementById(btnId);
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = "Removing...";
+      }
+
       try {
-        // DELETE the item from Thinger.io bucket
-        await axios.delete(`${THINGER_BUCKET_URL}/${itemId}`, {
-          headers: { "Authorization": "Bearer " + THINGER_TOKEN }
+        // Get the first ID for this item to mark as removed
+        const itemIdToRemove = item.ids[0];
+
+        // Write a REMOVED event to the bucket
+        await axios.post(THINGER_BUCKET_URL, {
+          cartId: cartId,
+          eventId: itemIdToRemove,
+          item: itemName,
+          price: item.price,
+          action: "REMOVED",
+          timestamp: new Date().toISOString()
+        }, {
+          headers: { 
+            "Authorization": "Bearer " + THINGER_TOKEN,
+            "Content-Type": "application/json"
+          }
         });
 
-        console.log(`Successfully deleted ${itemName} (ID: ${itemId})`);
+        console.log(`Marked ${itemName} as REMOVED (ID: ${itemIdToRemove})`);
         
-        // Immediately refresh cart data
-        await fetchCartData();
+        // Immediately refresh to show updated cart
+        setTimeout(fetchCartData, 500);
 
       } catch (err) {
         console.error("Failed to remove item:", err);
         alert("Failed to remove item. Please try again.");
+        
+        // Re-enable button on error
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = "❌ Remove";
+        }
       }
     }
 
