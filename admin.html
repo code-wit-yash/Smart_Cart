@@ -15,8 +15,10 @@
     .btn-remove, .btn-checkout { border-radius: 8px; color: white; border: none; padding: 5px 10px; cursor: pointer; transition: 0.3s; }
     .btn-remove { background: #ff4d4d; }
     .btn-remove:hover { background: #e60000; }
+    .btn-remove:disabled { background: #ccc; cursor: not-allowed; }
     .btn-checkout { background: #28a745; }
     .btn-checkout:hover { background: #1e7e34; }
+    .btn-checkout:disabled { background: #6c757d; cursor: not-allowed; }
     .alerts { color: red; font-weight: 600; }
   </style>
 </head>
@@ -49,21 +51,23 @@
 
         const rawData = res.data;
 
-        // Aggregate repeated items per cartId + name
+        // Filter out REMOVED items and aggregate by cart
         const carts = {};
         rawData.forEach(item => {
+          // Skip removed items
+          if (item.action === "REMOVED") return;
+
           const cartId = item.cartId;
           const name = item.item;
 
           if (!carts[cartId]) carts[cartId] = {};
           if (carts[cartId][name]) {
             carts[cartId][name].qty += 1;
-            // Store all IDs for this item
             carts[cartId][name].ids.push(item._id || item.eventId);
           } else {
             carts[cartId][name] = {
               id: item._id || item.eventId, 
-              ids: [item._id || item.eventId], // Store all IDs
+              ids: [item._id || item.eventId],
               name: name,
               price: item.price,
               qty: 1,
@@ -87,6 +91,11 @@
     function renderCarts() {
       const accordion = document.getElementById("cartsAccordion");
       accordion.innerHTML = "";
+
+      if (Object.keys(allCartData).length === 0) {
+        accordion.innerHTML = "<p class='text-center text-muted'>No active carts</p>";
+        return;
+      }
 
       Object.keys(allCartData).forEach((cartId, idx) => {
         const itemsObj = allCartData[cartId];
@@ -131,12 +140,12 @@
                         <td>₹${(item.price * item.qty).toFixed(2)}</td>
                         <td>${item.time}</td>
                         <td>${item.scanned ? "✅" : "❌"}</td>
-                        <td><button class="btn-remove" onclick="removeItem('${cartId}', '${item.name}')">❌ Remove</button></td>
+                        <td><button class="btn-remove" id="btn-${cartId}-${item.name.replace(/\s+/g, '-')}" onclick="removeItem('${cartId}', '${item.name.replace(/'/g, "\\'")}')">❌ Remove</button></td>
                       </tr>
                     `).join('')}
                   </tbody>
                 </table>
-                <button class="btn btn-checkout" onclick="checkoutCart('${cartId}')">✅ Checkout Cart</button>
+                <button class="btn btn-checkout" id="checkout-${cartId}" onclick="checkoutCart('${cartId}')">✅ Checkout Cart</button>
               </div>
             </div>
           </div>
@@ -151,39 +160,75 @@
         return;
       }
 
+      const btnId = `btn-${cartId}-${itemName.replace(/\s+/g, '-')}`;
+      const btn = document.getElementById(btnId);
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = "Removing...";
+      }
+
       try {
         const item = allCartData[cartId][itemName];
-        
-        // Delete one instance (the first ID in the array)
-        const idToDelete = item.ids[0];
-        
-        await axios.delete(`${THINGER_BUCKET_URL}/${idToDelete}`, { 
-          headers: { "Authorization": "Bearer " + THINGER_TOKEN } 
+        const itemIdToRemove = item.ids[0];
+
+        // Mark as REMOVED by posting new entry
+        await axios.post(THINGER_BUCKET_URL, {
+          cartId: cartId,
+          eventId: itemIdToRemove,
+          item: itemName,
+          price: item.price,
+          action: "REMOVED",
+          timestamp: new Date().toISOString()
+        }, {
+          headers: { 
+            "Authorization": "Bearer " + THINGER_TOKEN,
+            "Content-Type": "application/json"
+          }
         });
+
+        console.log(`Marked ${itemName} as REMOVED in cart ${cartId}`);
         
-        console.log(`Successfully deleted ${itemName} (ID: ${idToDelete})`);
-        
-        // Refresh data immediately
-        await fetchAllCarts();
-        
+        // Refresh after short delay
+        setTimeout(fetchAllCarts, 500);
+
       } catch (err) {
         console.error("Failed to remove item:", err);
         alert("Failed to remove item. Check console for details.");
+        
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = "❌ Remove";
+        }
       }
     }
 
     async function checkoutCart(cartId) {
       if (!allCartData[cartId]) return;
       
+      const checkoutBtn = document.getElementById(`checkout-${cartId}`);
+      if (checkoutBtn) {
+        checkoutBtn.disabled = true;
+        checkoutBtn.innerText = "Processing...";
+      }
+
       const items = Object.values(allCartData[cartId]);
       
       try {
-        // Delete all items in this cart
+        // Mark all items as REMOVED
         for (const item of items) {
-          // Delete all IDs associated with this item
           for (const id of item.ids) {
-            await axios.delete(`${THINGER_BUCKET_URL}/${id}`, { 
-              headers: { "Authorization": "Bearer " + THINGER_TOKEN } 
+            await axios.post(THINGER_BUCKET_URL, {
+              cartId: cartId,
+              eventId: id,
+              item: item.name,
+              price: item.price,
+              action: "REMOVED",
+              timestamp: new Date().toISOString()
+            }, {
+              headers: { 
+                "Authorization": "Bearer " + THINGER_TOKEN,
+                "Content-Type": "application/json"
+              }
             });
           }
         }
@@ -191,13 +236,18 @@
         console.log(`Cart ${cartId} checked out successfully`);
         
         // Refresh data
-        await fetchAllCarts();
+        setTimeout(fetchAllCarts, 500);
         
         alert(`Cart ${cartId} checked out and cleared!`);
         
       } catch (err) {
         console.error("Checkout failed:", err);
         alert("Checkout failed. Check console.");
+        
+        if (checkoutBtn) {
+          checkoutBtn.disabled = false;
+          checkoutBtn.innerText = "✅ Checkout Cart";
+        }
       }
     }
 
