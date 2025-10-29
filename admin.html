@@ -3,99 +3,200 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smart Cart - Admin</title>
+  <title>🛒 Smart Cart - Admin Panel</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+
+  <style>
+    body { font-family: 'Poppins', sans-serif; background: #f0f2f5; }
+    .navbar { background: linear-gradient(90deg, #007bff, #00c6ff); }
+    .navbar-brand { color: white !important; font-weight: 600; }
+    .accordion-button:not(.collapsed) { background-color: #007bff; color: white; }
+    .btn-remove, .btn-checkout, .btn-clear-all { border-radius: 8px; color: white; border: none; padding: 5px 10px; cursor: pointer; transition: 0.3s; }
+    .btn-remove { background: #ff4d4d; }
+    .btn-remove:hover { background: #e60000; }
+    .btn-checkout { background: #28a745; margin-right: 10px; }
+    .btn-checkout:hover { background: #1e7e34; }
+    .btn-clear-all { background: #6c757d; }
+    .btn-clear-all:hover { background: #5a6268; }
+    .alerts { color: red; font-weight: 600; }
+  </style>
 </head>
+<body>
 
-<body class="p-4">
+  <nav class="navbar navbar-expand-lg">
+    <div class="container">
+      <a class="navbar-brand" href="#">🛒 Smart Cart - Admin</a>
+    </div>
+  </nav>
 
-<h2>Admin Cart View</h2>
-<div id="carts"></div>
+  <div class="container my-5">
+    <h3 class="mb-4">All Carts</h3>
+    <button class="btn btn-clear-all mb-3" onclick="clearAllRemovedItems()">🗑️ Clear All Removed Items History</button>
+    <div class="accordion" id="cartsAccordion"></div>
+  </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const THINGER_BUCKET_URL = "https://api.thinger.io/v2/users/yash7642/buckets/cart_events/data";
-const THINGER_TOKEN = "YOUR_TOKEN";
+const THINGER_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJyZWFkX2NhcnQiLCJzdnIiOiJldS1jZW50cmFsLmF3cy50aGluZ2VyLmlvIiwidXNyIjoieWFzaDc2NDIifQ.lGO_NX7ctPtObLJToP4lJnvw9nC6yxejVQFy7FJ5Yo4";
 
-let allCarts = {};
+let allCartData = {};
+let openCartId = null;
+
+// ✅ Removed item ids now stored in localStorage shared across user/admin tabs
 let removedItemIds = {};
 
-// ✅ Shared Chat Channel
-const syncChannel = new BroadcastChannel("cart_sync_channel");
-
-function broadcastUpdate() {
-  syncChannel.postMessage({ type: "update_removed_items" });
-}
-
-syncChannel.onmessage = () => {
-  loadRemovedItems();
-  fetchAllCarts();
-};
-
 function loadRemovedItems() {
-  const saved = localStorage.getItem("admin_removed_items");
-  removedItemIds = saved ? JSON.parse(saved) : {};
+  const stored = localStorage.getItem('admin_removed_items');
+  if (stored) {
+    const parsed = JSON.parse(stored);
+    Object.keys(parsed).forEach(cartId => {
+      removedItemIds[cartId] = new Set(parsed[cartId]);
+    });
+  }
 }
 
 function saveRemovedItems() {
-  localStorage.setItem("admin_removed_items", JSON.stringify(removedItemIds));
-  broadcastUpdate();
+  const toSave = {};
+  Object.keys(removedItemIds).forEach(cartId => {
+    toSave[cartId] = [...removedItemIds[cartId]];
+  });
+  localStorage.setItem('admin_removed_items', JSON.stringify(toSave));
+}
+
+function clearAllRemovedItems() {
+  if (confirm("Clear removal history for all carts?")) {
+    removedItemIds = {};
+    localStorage.removeItem('admin_removed_items');
+    fetchAllCarts();
+    alert("All removed history cleared!");
+  }
 }
 
 async function fetchAllCarts() {
-  const res = await axios.get(THINGER_BUCKET_URL, { headers: { Authorization: "Bearer " + THINGER_TOKEN } });
+  try {
+    const res = await axios.get(THINGER_BUCKET_URL, {
+      headers: { "Authorization": "Bearer " + THINGER_TOKEN }
+    });
 
-  const data = res.data;
-  const carts = {};
+    const rawData = res.data;
+    const carts = {};
 
-  data.forEach(event => {
-    const id = event._id || event.eventId;
-    if (!carts[event.cartId]) carts[event.cartId] = {};
-    if (removedItemIds[event.cartId]?.includes(id)) return;
+    rawData.forEach(item => {
+      const cartId = item.cartId;
+      const itemId = item._id || item.eventId;
+      if (!carts[cartId]) carts[cartId] = {};
 
-    if (!carts[event.cartId][event.item]) {
-      carts[event.cartId][event.item] = { price: event.price, qty: 1, ids: [id] };
-    } else {
-      carts[event.cartId][event.item].qty++;
-      carts[event.cartId][event.item].ids.push(id);
+      if (item.action === "REMOVED") return;
+      if (removedItemIds[cartId] && removedItemIds[cartId].has(itemId)) return;
+
+      if (carts[cartId][item.item]) {
+        carts[cartId][item.item].qty++;
+        carts[cartId][item.item].ids.push(itemId);
+      } else {
+        carts[cartId][item.item] = {
+          name: item.item,
+          price: item.price,
+          qty: 1,
+          ids: [itemId],
+          time: new Date(item.timestamp).toLocaleTimeString(),
+          scanned: item.action !== "UNKNOWN"
+        };
+      }
+    });
+
+    if (JSON.stringify(carts) !== JSON.stringify(allCartData)) {
+      allCartData = carts;
+      renderCarts();
     }
-  });
 
-  allCarts = carts;
-  renderCarts();
+  } catch (err) {
+    console.error("Error fetching data:", err);
+  }
 }
 
 function renderCarts() {
-  const container = document.getElementById("carts");
-  container.innerHTML = "";
+  const accordion = document.getElementById("cartsAccordion");
+  accordion.innerHTML = "";
 
-  Object.keys(allCarts).forEach(cartId => {
-    const items = allCarts[cartId];
+  Object.keys(allCartData).forEach((cartId, idx) => {
+    const items = Object.values(allCartData[cartId]);
+    const totalAmount = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+    const unscanned = items.some(i => !i.scanned);
+    const alertMsg = unscanned ? "❗ Unscanned Item" : "";
 
-    container.innerHTML += `<h4>Cart: ${cartId}</h4>`;
-    Object.keys(items).forEach(name => {
-      const item = items[name];
-      container.innerHTML += `
-        ${name} - ₹${item.price} × ${item.qty}
-        <button onclick="removeItem('${cartId}','${name}')">❌ Remove</button>
-        <br>`;
-    });
-
-    container.innerHTML += `<hr>`;
+    accordion.innerHTML += `
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button ${cartId === openCartId ? '' : 'collapsed'}"
+            data-bs-toggle="collapse" data-bs-target="#cart${idx}" onclick="openCartId='${cartId}'">
+            Cart ID: ${cartId} | Total: ₹${totalAmount.toFixed(2)} | <span class="alerts">${alertMsg}</span>
+          </button>
+        </h2>
+        <div id="cart${idx}" class="accordion-collapse collapse ${cartId === openCartId ? 'show' : ''}">
+          <div class="accordion-body">
+            <table class="table align-middle">
+              <thead>
+                <tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th><th>Time</th><th>Scan</th><th>Action</th></tr>
+              </thead>
+              <tbody>
+                ${items.map(item => `
+                  <tr>
+                    <td>${item.name}</td>
+                    <td>₹${item.price.toFixed(2)}</td>
+                    <td>${item.qty}</td>
+                    <td>₹${(item.price * item.qty).toFixed(2)}</td>
+                    <td>${item.time}</td>
+                    <td>${item.scanned ? "✅" : "❌"}</td>
+                    <td><button class="btn-remove" onclick="removeItem('${cartId}', '${item.name.replace(/'/g,"\\'")}')">❌</button></td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+            <button class="btn-checkout" onclick="checkoutCart('${cartId}')">✅ Checkout</button>
+            <button class="btn-clear-all" onclick="clearCartRemovedItems('${cartId}')">🗑️ Clear Removed</button>
+          </div>
+        </div>
+      </div>`;
   });
 }
 
 function removeItem(cartId, itemName) {
-  const id = allCarts[cartId][itemName].ids[0];
-  if (!removedItemIds[cartId]) removedItemIds[cartId] = [];
-  removedItemIds[cartId].push(id);
+  const item = allCartData[cartId][itemName];
+  const itemId = item.ids[0];
+
+  if (!removedItemIds[cartId]) removedItemIds[cartId] = new Set();
+  removedItemIds[cartId].add(itemId);
   saveRemovedItems();
   fetchAllCarts();
 }
 
+function checkoutCart(cartId) {
+  if (confirm(`Checkout cart ${cartId}?`)) {
+    const items = Object.values(allCartData[cartId]);
+    if (!removedItemIds[cartId]) removedItemIds[cartId] = new Set();
+    items.forEach(i => i.ids.forEach(id => removedItemIds[cartId].add(id)));
+    saveRemovedItems();
+    fetchAllCarts();
+  }
+}
+
+function clearCartRemovedItems(cartId) {
+  delete removedItemIds[cartId];
+  saveRemovedItems();
+  fetchAllCarts();
+}
+
+// ✅ Sync with User Page automatically
+window.addEventListener("storage", () => {
+  loadRemovedItems();
+  fetchAllCarts();
+});
+
 loadRemovedItems();
 setInterval(fetchAllCarts, 5000);
-fetchAllCarts();
+window.onload = fetchAllCarts;
 </script>
 
 </body>
